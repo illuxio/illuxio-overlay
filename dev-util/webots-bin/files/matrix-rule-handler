@@ -1,0 +1,214 @@
+#!/bin/bash
+#
+# Abstract: simple script to be called by udevd as soon the matrix
+#           udev rule matches.
+#    
+#
+LOCATION_HANDLER=/opt/webots-bin
+
+
+#
+# for LSUSB_MODE (-o Option) the following definitions are
+# required
+#
+MATRIX_IDS="0e50:0002 0e50:0001"
+LSUSB=/sbin/lsusb
+
+#
+# command flags
+#
+EMIT=0
+OLD=0
+
+
+
+
+usage()
+{
+  cat << here
+
+  usage: matrix-rule-handler [-r [-o]] [-h]
+
+  -r output rule file to stdout
+  -o old style
+  -h print usage
+
+  Use this script to generate a udev(8) rule, to correctly open the protection
+  for usb connected matrix dongles.
+
+  The following steps should do:
+
+  1. place this script into "/opt/webots" , if this directory does
+     not exist, create it
+
+  2. make sure the protection of the script is set as following:
+     "-rwxr-xr-x  root root" 
+     
+  3. execute this script with the option -r and redirect output to
+     "/lib/udev/rules.d/99-webots.rules"
+
+     Example:
+     "./matrix-rule-handler -r > /lib/udev/rules.d/99-webots.rules"
+
+     Note:
+     This works only for newer udev versions. For older versions add the
+     option -o (old), which will not use the "==" operator and will not use
+     the "ACTION" keyword. In addition it will turn on LSUSB_DETECTION mode.
+
+     LSUSB_DETECTION means use lsusb to find matrix dongles and change the
+     protection.
+
+
+  4. set the protection of this file to
+     "-rw-r--r-- root root"
+
+  5. restart "udevd". On recent Linux, you may type "service udev reload"
+     otherwise, see "/etc/init.d" ... for a startscript, for even older
+     versions udevd will be called during plugin of the dongle, no need
+     to restart it.
+     
+  6. plugin dongle, see "/var/log/syslog" for infos
+
+     Example:
+     "tail -f /var/log/syslog | grep matrix"
+ 
+  7. if it is NOT working, turn debugging for "udevd" on, see 
+     "/etc/udev/udev.conf" for info
+     Restart "udevd" and check "/var/log/syslog"
+
+  8. if you are done, don't forget to turn debugging off in "udev.conf"
+
+  Tested on Ubuntu 12.04
+
+  Note:
+  udev is not used in older distributions. There are also syntactical changes
+  and a lot of different udev versions.
+  If you have an older kernel, check the following:
+  
+  o Sometimes a component called "resmgr" is used (SuSE). Probably you can set
+    device protection making adjustments to the "resmgr" config file.
+
+  o Sometimes not all udev rules are honored. In this case the devices
+    below /proc/bus/usb are probably chmod'ed using one udev rule, but libusb
+    is not accessing them in favour to udev generated device entries in /dev.
+    If this is the case, use "lsusb" to check for the matrix device:
+
+    Example: Bus 001 Device 002: ID 0e50:0002
+
+    In this case a device "/proc/bus/usb/001/002"  should exist and should have
+    received proper protection.
+
+    You can tell libusb to use this file instead the one below /dev, by setting
+    the environment variable USB_DEVFS_PATH to "/proc/bus/usb".
+
+  o For older udev implementations try the -o option (old mode, 
+    LSUSB_DETECTION). In this case, we try to use lsusb to find the matrix 
+    devices and change the access mode. In case libusb is accessing it, this 
+    should work. Probably use USB_DEVFS_PATH to force libusb to access the 
+    proc devices. 
+    
+
+
+here
+
+}
+
+emit_rule()
+{
+# $1 path to this script 
+# $2 old mode
+
+printf " # rules to set the protection for matrix dongles \n"
+    
+if [ "$2" = "1" ]
+then
+    printf "BUS=\"usb\", SYSFS{idVendor}=\"0e50\", SYSFS{idProduct}=\"000[1-9]\", PROGRAM=\"$1 LSUSB_DETECTION\" \n"
+    printf "BUS=\"usb\", SYSFS{idVendor}=\"0e50\", SYSFS{idProduct}=\"000[1-9]\", MODE=\"0666\" \n"
+else
+    printf "SUBSYSTEM==\"usb|usb_device\", ACTION==\"add\", ATTR{idVendor}==\"0e50\", ATTR{idProduct}==\"000[1-9]\", PROGRAM=\"$1\" \n"
+    printf "SUBSYSTEM==\"usb|usb_device\", ACTION==\"add\", ATTR{idVendor}==\"0e50\", ATTR{idProduct}==\"000[1-9]\", MODE=\"0666\" \n"
+fi
+}
+
+find_matrix_device()
+{
+
+  RESULT=""
+  GOOD=""
+
+  for key in $MATRIX_IDS
+  do
+    RESULT="$RESULT `$LSUSB | grep "$key"  | awk '{ printf "/proc/bus/usb/%s/%s\n",$2,$4 }' | sed "s/://"`"
+  done
+
+  for r in $RESULT
+  do
+    if [ -f  $r ]
+    then
+     GOOD="$GOOD $r"
+    fi
+  done
+
+  echo $GOOD
+}
+
+
+usb_chmod()
+{
+ devices=`find_matrix_device`
+ for d in $devices
+ do
+   chmod a+rw $d
+  logger -t matrix -p syslog.info  "chmod $d"
+ done 
+}
+
+
+while getopts "rho" flag
+do
+  case $flag in 
+      r)
+	  EMIT=1
+	  ;;
+      o)
+	  OLD=1
+	  ;;
+      h)
+	  usage
+	  exit 0
+	  ;;
+  esac
+done
+      
+
+if [ $EMIT -eq 1 ]
+then
+  emit_rule $LOCATION_HANDLER/matrix-rule-handler "$OLD"
+  exit 0
+fi
+
+# 
+BAD_MSG="Failed to set protection for Matrix usb device $DEVICE"
+GOOD_MSG="Protection for Matrix usb device $DEVICE set"
+MISSING_MSG="No DEVICE specified, ignoring this call"
+
+if [ "$DEVICE" = "" ]
+then
+  logger -t matrix -p syslog.info  "$MISSING_MSG"
+  if [ "$1" = "LSUSB_DETECTION" ]
+  then
+    usb_chmod
+  fi
+  exit 0
+fi
+
+chmod 666 $DEVICE 
+
+if [ $? -ne  0 ]
+then
+  logger -t matrix -p   syslog.err "$BAD_MSG" 
+else
+  logger -t matrix -p syslog.info "$GOOD_MSG"
+fi
+
+exit 1
