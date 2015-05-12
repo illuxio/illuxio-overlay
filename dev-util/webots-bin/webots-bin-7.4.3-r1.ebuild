@@ -25,7 +25,10 @@ SRC_URI="amd64? ( ${SRC_BASE}/${PNS}-${PV}-x86-64.tar.bz2 )
 RDEPEND="udev? (
 		  virtual/udev
 		)
-		~media-libs/jpeg-8d
+		|| (
+			~media-libs/jpeg-8d
+			>=media-libs/libjpeg-turbo-1.4.0[jpeg8]
+		)
 		media-libs/jasper
 		media-libs/libraw
 		dev-libs/libusb-compat"
@@ -48,7 +51,7 @@ src_install() {
 	
 	# Normal files
 	insinto ${WEBOTS_HOME}
-	doins -r bin doc include resources
+	doins -r bin doc include projects resources transfer
 	
 	exeinto ${WEBOTS_HOME}
 	doexe webots ${FILESDIR}/matrix-rule-handler
