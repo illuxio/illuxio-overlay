@@ -36,7 +36,7 @@ DEPEND="${COMMON_DEPEND}
 MULTILIB_WRAPPED_HEADERS=( /usr/include/jconfig.h )
 
 src_prepare() {
-	epatch "${FILESDIR}"/${PN}-1.2.0-x32.patch #420239
+	epatch "${FILESDIR}"/${PN}-1.4.0-x32.patch #420239
 
 	# generate a new ./configure compatible with non-bash shells, #533902
 	eautoreconf
